@@ -24,6 +24,10 @@ spec:
   selector:
     matchLabels:
       {{- include "loki.queryFrontendSelectorLabels" $ | nindent 6 }}
+    {{- with .matchExpressions }}
+    matchExpressions:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
   endpoints:
     - port: http
       {{- with .interval }}
@@ -47,5 +51,9 @@ spec:
       tlsConfig:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- with .targetLabels }}
+  targetLabels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}
 {{- end }}

@@ -49,9 +49,15 @@ Common labels
 helm.sh/chart: {{ include "tempo.chart" . }}
 {{ include "tempo.selectorLabels" . }}
 {{- if or .Chart.AppVersion .Values.tempo.tag }}
-app.kubernetes.io/version: {{ .Values.tempo.tag | default .Chart.AppVersion | quote }}
+app.kubernetes.io/version: {{ mustRegexReplaceAllLiteral "@sha.*" .Values.tempo.tag "" | default .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- with .Values.extraLabels }}
+{{ toYaml . }}
+{{- end }}
+{{- with .Values.global.commonLabels }}
+{{ toYaml . }}
+{{- end }}
 {{- end -}}
 
 {{/*
@@ -69,7 +75,41 @@ Common labels
 helm.sh/chart: {{ include "tempo.chart" . }}
 {{ include "tempo.imageRenderer.selectorLabels" . }}
 {{- if or .Chart.AppVersion .Values.image.tag }}
-app.kubernetes.io/version: {{ .Values.image.tag | default .Chart.AppVersion | quote }}
-{{- end }}
+app.kubernetes.io/version: {{ mustRegexReplaceAllLiteral "@sha.*" .Values.image.tag "" | default .Chart.AppVersion | quote }}
+{{- end }}`
 app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- end -}}
+
+{{/*
+Return the appropriate apiVersion for ingress.
+*/}}
+{{- define "tempo.ingress.apiVersion" -}}
+{{- if and ($.Capabilities.APIVersions.Has "networking.k8s.io/v1") (semverCompare ">= 1.19-0" .Capabilities.KubeVersion.Version) }}
+{{- print "networking.k8s.io/v1" }}
+{{- else if $.Capabilities.APIVersions.Has "networking.k8s.io/v1beta1" }}
+{{- print "networking.k8s.io/v1beta1" }}
+{{- else }}
+{{- print "extensions/v1beta1" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Return if ingress is stable.
+*/}}
+{{- define "tempo.ingress.isStable" -}}
+{{- eq (include "tempo.ingress.apiVersion" .) "networking.k8s.io/v1" }}
+{{- end }}
+
+{{/*
+Return if ingress supports ingressClassName.
+*/}}
+{{- define "tempo.ingress.supportsIngressClassName" -}}
+{{- or (eq (include "tempo.ingress.isStable" .) "true") (and (eq (include "tempo.ingress.apiVersion" .) "networking.k8s.io/v1beta1") (semverCompare ">= 1.18-0" .Capabilities.KubeVersion.Version)) }}
+{{- end }}
+
+{{/*
+Return if ingress supports pathType.
+*/}}
+{{- define "tempo.ingress.supportsPathType" -}}
+{{- or (eq (include "tempo.ingress.isStable" .) "true") (and (eq (include "tempo.ingress.apiVersion" .) "networking.k8s.io/v1beta1") (semverCompare ">= 1.18-0" .Capabilities.KubeVersion.Version)) }}
+{{- end }}

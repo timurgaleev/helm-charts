@@ -1,15 +1,7 @@
 {{/*
-memcached common labels
+memcachedExporter imagePullSecrets
 */}}
-{{- define "tempo.memcachedLabels" -}}
-{{ include "tempo.labels" . }}
-app.kubernetes.io/component: memcached
-{{- end }}
-
-{{/*
-memcached selector labels
-*/}}
-{{- define "tempo.memcachedSelectorLabels" -}}
-{{ include "tempo.selectorLabels" . }}
-app.kubernetes.io/component: memcached
+{{- define "tempo.memcachedExporterImagePullSecrets" -}}
+{{- $dict := dict "component" .Values.memcachedExporter.image "global" .Values.global.image "tempo" (dict) -}}
+{{- include "tempo.imagePullSecrets" $dict -}}
 {{- end }}

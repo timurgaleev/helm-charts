@@ -40,7 +40,7 @@ spec:
       priorityClassName: {{ .Values.gateway.priorityClassName }}
       {{- end }}
       securityContext:
-        {{- toYaml .Values.gateway.securityContext | nindent 8 }}
+        {{- toYaml .Values.gateway.podSecurityContext | nindent 8 }}
       initContainers:
         {{- toYaml .Values.gateway.initContainers | nindent 8 }}
       {{- if .Values.image.pullSecrets }}
@@ -48,6 +48,10 @@ spec:
       {{- range .Values.image.pullSecrets }}
         - name: {{ . }}
       {{- end }}
+      {{- end }}
+      {{- with .Values.gateway.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: gateway
@@ -97,7 +101,7 @@ spec:
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
           securityContext:
-            readOnlyRootFilesystem: true
+            {{- toYaml .Values.gateway.containerSecurityContext | nindent 12 }}
           env:
             {{- if .Values.gateway.env }}
             {{ toYaml .Values.gateway.env | nindent 12 }}
