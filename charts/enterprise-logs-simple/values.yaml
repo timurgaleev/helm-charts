@@ -1,3 +1,5 @@
+# DEPRECATED
+# This chart is now deprecated and will no longer be updated. Grafana Enterprise Logs v1.4.0 is included in the `loki-simple-scalable` chart which implements Grafana Enterprise Logs as an option (`enterprise.enabled: true`).
 # -----------------------------------------
 # Configuration for `enterprise-logs` chart
 # -----------------------------------------
@@ -18,7 +20,7 @@ image: &image  # -- The container registry to use
   # -- The image repository to use
   repository: grafana/enterprise-logs
   # -- The version of Grafana Enterprise Logs
-  tag: v1.3.0
+  tag: v1.4.0
   # -- Defines the policy how and when images are pulled
   pullPolicy: IfNotPresent
   # -- Additional image pull secrets
@@ -162,6 +164,11 @@ structuredConfig: {}
 tokengen:
   # -- Whether the job should be part of the deployment
   enable: true
+  # -- hostAliases to add
+  hostAliases: []
+  #  - ip: 1.2.3.4
+  #    hostnames:
+  #      - domain.tld
   # -- Name of the secret to store the admin token in
   adminTokenSecret: "gel-admin-token"
   # -- Additional CLI arguments for the `tokengen` target
@@ -207,7 +214,7 @@ loki-simple-scalable:
   # RBAC configuration
   rbac:
     # -- If enabled, a PodSecurityPolicy is created
-    pspEnabled: true
+    pspEnabled: false
 
   # -- Override gateway nginx.conf to include admin-api routes
   gateway:
@@ -229,6 +236,8 @@ loki-simple-scalable:
           fastcgi_temp_path     /tmp/fastcgi_temp;
           uwsgi_temp_path       /tmp/uwsgi_temp;
           scgi_temp_path        /tmp/scgi_temp;
+
+          proxy_http_version    1.1;
 
           default_type application/octet-stream;
           log_format   {{ .Values.gateway.nginxConfig.logFormat }}
