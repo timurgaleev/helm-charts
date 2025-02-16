@@ -7,10 +7,18 @@ metadata:
     {{- include "tempo.labels" . | nindent 4 }}
   {{- with .Values.annotations }}
   annotations:
-    {{ toYaml . | indent 4 }}
+    {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   replicas: {{ .Values.replicas }}
+  {{- if .Values.revisionHistoryLimit }}
+  revisionHistoryLimit: {{ .Values.revisionHistoryLimit }}
+  {{- end }}
+  {{- if and (semverCompare ">= 1.23-0" .Capabilities.KubeVersion.Version) (.Values.persistence.enableStatefulSetAutoDeletePVC) (.Values.persistence.enabled) }}
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Delete
+    whenScaled: Delete
+  {{- end }}
   selector:
     matchLabels:
       {{- include "tempo.selectorLabels" . | nindent 6 }}
@@ -23,11 +31,31 @@ spec:
           {{- toYaml . | nindent 8 }}
         {{- end }}
       annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap-tempo.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
           {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
       serviceAccountName: {{ include "tempo.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- if or .Values.tempo.pullSecrets  ( and .Values.tempoQuery.enabled .Values.tempoQuery.pullSecrets ) }}
+      imagePullSecrets:
+      {{- range .Values.tempo.pullSecrets }}
+        - name: {{ . }}
+      {{- end}}
+      {{- if and .Values.tempoQuery.enabled .Values.tempoQuery.pullSecrets }}
+      {{- range .Values.tempoQuery.pullSecrets }}
+        - name: {{ . }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- with .Values.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - args:
         - -config.file=/conf/tempo.yaml
@@ -35,7 +63,7 @@ spec:
         {{- range $key, $value := .Values.tempo.extraArgs }}
         - "-{{ $key }}{{ if $value }}={{ $value }}{{ end }}"
         {{- end }}
-        image: {{ .Values.tempo.repository }}:{{ .Values.tempo.tag }}
+        image: {{ .Values.tempo.repository }}:{{ .Values.tempo.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.tempo.pullPolicy }}
         name: tempo
         ports:
@@ -58,15 +86,29 @@ spec:
         - containerPort: 4317
           name: otlp-grpc
         - containerPort: 55681
+          name: otlp-httplegacy
+        - containerPort: 4318
           name: otlp-http
         - containerPort: 55678
           name: opencensus
+        livenessProbe:
+          {{- toYaml .Values.tempo.livenessProbe | nindent 12 }}
+        readinessProbe:
+          {{- toYaml .Values.tempo.readinessProbe | nindent 12 }}
         resources:
           {{- toYaml .Values.tempo.resources | nindent 10 }}
+        {{- with .Values.tempo.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         env:
-          {{- if .Values.tempo.extraEnv }}
-            {{- toYaml .Values.tempo.extraEnv | nindent 12 }}
+          {{- with .Values.tempo.extraEnv }}
+            {{- toYaml . | nindent 10 }}
           {{- end }}
+        {{- with .Values.tempo.extraEnvFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         volumeMounts:
         {{- if .Values.tempo.extraVolumeMounts -}}
           {{ toYaml .Values.tempo.extraVolumeMounts | nindent 8 }}
@@ -77,13 +119,18 @@ spec:
         - mountPath: /var/tempo
           name: storage
         {{- end }}
+        {{- if .Values.tempo.metricsGenerator.enabled }}
+        - mountPath: /tmp
+          name: tmp
+        {{- end }}
+      {{- if .Values.tempoQuery.enabled }}
       - args:
         - --query.base-path=/
         - --grpc-storage-plugin.configuration-file=/conf/tempo-query.yaml
         {{- range $key, $value := .Values.tempoQuery.extraArgs }}
         - "-{{ $key }}{{ if $value }}={{ $value }}{{ end }}"
         {{- end }}
-        image: {{ .Values.tempoQuery.repository }}:{{ .Values.tempoQuery.tag }}
+        image: {{ .Values.tempoQuery.repository }}:{{ .Values.tempoQuery.tag | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.tempoQuery.pullPolicy }}
         name: tempo-query
         ports:
@@ -97,18 +144,27 @@ spec:
           {{- end }}
         resources:
           {{- toYaml .Values.tempoQuery.resources | nindent 10 }}
+        {{- with .Values.tempoQuery.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         volumeMounts:
         {{- if .Values.tempoQuery.extraVolumeMounts -}}
           {{ toYaml .Values.tempoQuery.extraVolumeMounts | nindent 8 }}
         {{- end }}
         - mountPath: /conf
           name: tempo-query-conf
+      {{- end }}
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.securityContext }}
+      securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.tolerations }}
@@ -119,12 +175,18 @@ spec:
       {{- if .Values.extraVolumes -}}
         {{ toYaml .Values.extraVolumes | nindent 6 }}
       {{- end }}
+      {{- if .Values.tempoQuery.enabled }}
       - configMap:
           name: {{ template "tempo.name" . }}-query
         name: tempo-query-conf
+      {{- end }}
       - configMap:
           name: {{ template "tempo.name" . }}
         name: tempo-conf
+      {{- if .Values.tempo.metricsGenerator.enabled }}
+      - name: tmp
+        emptyDir: {}
+      {{- end }}
   updateStrategy:
     type: {{- toYaml .Values.tempo.updateStrategy | nindent 6 }}
   {{- if .Values.persistence.enabled }}
