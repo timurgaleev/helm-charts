@@ -1,8 +1,10 @@
 {{- if .Values.queryFrontend.autoscaling.enabled }}
-apiVersion: autoscaling/v2beta1
+{{- $apiVersion := include "loki.hpa.apiVersion" . -}}
+apiVersion: {{ $apiVersion }}
 kind: HorizontalPodAutoscaler
 metadata:
   name: {{ include "loki.queryFrontendFullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "loki.queryFrontendLabels" . | nindent 4 }}
 spec:
@@ -17,12 +19,36 @@ spec:
     - type: Resource
       resource:
         name: memory
+        {{- if (eq $apiVersion "autoscaling/v2") }}
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+        {{- else }}
         targetAverageUtilization: {{ . }}
+        {{- end }}
   {{- end }}
   {{- with .Values.queryFrontend.autoscaling.targetCPUUtilizationPercentage }}
     - type: Resource
       resource:
         name: cpu
+        {{- if (eq $apiVersion "autoscaling/v2") }}
+        target:
+          type: Utilization
+          averageUtilization: {{ . }}
+        {{- else }}
         targetAverageUtilization: {{ . }}
+        {{- end }}
+  {{- end }}
+  {{- with .Values.queryFrontend.autoscaling.customMetrics }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if .Values.queryFrontend.autoscaling.behavior.enabled }}
+  behavior:
+    {{- with .Values.queryFrontend.autoscaling.behavior.scaleDown }}
+    scaleDown: {{ toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with .Values.queryFrontend.autoscaling.behavior.scaleUp }}
+    scaleUp: {{ toYaml . | nindent 6 }}
+    {{- end }}
   {{- end }}
 {{- end }}
