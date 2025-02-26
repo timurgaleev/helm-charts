@@ -1,13 +1,14 @@
+{{ $dict := dict "ctx" . "component" "compactor" "memberlist" true }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ template "tempo.compactorFullname" . }}
+  name: {{ template "tempo.resourceName" $dict }}
   namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "tempo.compactorLabels" . | nindent 4 }}
+    {{- include "tempo.labels" $dict | nindent 4 }}
   {{- with .Values.compactor.annotations }}
   annotations:
-    {{ toYaml . | indent 4 }}
+  {{- toYaml . | nindent 4 }}
   {{- end }}
 spec:
   minReadySeconds: 10
@@ -15,7 +16,7 @@ spec:
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      {{- include "tempo.compactorSelectorLabels" . | nindent 6 }}
+      {{- include "tempo.selectorLabels" $dict | nindent 6 }}
   strategy:
     rollingUpdate:
       maxSurge: 0
@@ -23,8 +24,7 @@ spec:
   template:
     metadata:
       labels:
-        {{- include "tempo.compactorLabels" . | nindent 8 }}
-        {{- include "tempo.gossipRing.selectorLabels" . | nindent 8 }}
+        {{- include "tempo.podLabels" $dict | nindent 8 }}
         {{- with .Values.tempo.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -40,7 +40,22 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- if or (.Values.compactor.priorityClassName) (.Values.global.priorityClassName) }}
+      priorityClassName: {{ default .Values.compactor.priorityClassName .Values.global.priorityClassName }}
+      {{- end }}
       serviceAccountName: {{ include "tempo.serviceAccountName" . }}
+      {{- with .Values.tempo.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      enableServiceLinks: false
+      {{- include "tempo.compactorImagePullSecrets" . | nindent 6 -}}
+      {{- with .Values.compactor.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        {{- toYaml .Values.ingester.initContainers | nindent 8 }}
       containers:
         - args:
             - -target=compactor
@@ -49,17 +64,22 @@ spec:
             {{- with .Values.compactor.extraArgs }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
-          image: {{ include "tempo.compactorImage" . }}
+          image: {{ include "tempo.imageReference" $dict }}
           imagePullPolicy: {{ .Values.tempo.image.pullPolicy }}
           name: compactor
           ports:
             - containerPort: 3100
-              name: http
-            - containerPort: 7946
+              name: http-metrics
+            - containerPort: {{ include "tempo.memberlistBindPort" . }}
               name: http-memberlist
-          {{- with .Values.compactor.extraEnv }}
+          {{- if or .Values.global.extraEnv .Values.compactor.extraEnv }}
           env:
-            {{- toYaml . | nindent 12 }}
+            {{- with .Values.global.extraEnv }}
+              {{ toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.compactor.extraEnv }}
+              {{ toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.compactor.extraEnvFrom }}
           envFrom:
@@ -73,11 +93,28 @@ spec:
           {{- end }}
           volumeMounts:
             - mountPath: /conf
-              name: tempo-conf
+              name: config
+            - mountPath: /runtime-config
+              name: runtime-config
+            - mountPath: /var/tempo
+              name: tempo-compactor-store
+            {{- if .Values.enterprise.enabled }}
+            - name: license
+              mountPath: /license
+            {{- end }}
             {{- with .Values.compactor.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+        {{- with .Values.compactor.extraContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
       terminationGracePeriodSeconds: {{ .Values.compactor.terminationGracePeriodSeconds }}
+      {{- if semverCompare ">= 1.19-0" .Capabilities.KubeVersion.Version }}
+      {{- with .Values.compactor.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- tpl . $ | nindent 8 }}
+      {{- end }}
+      {{- end }}
       {{- with .Values.compactor.affinity }}
       affinity:
         {{- tpl . $ | nindent 8 }}
@@ -90,10 +127,24 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.compactor.dnsConfigOverides.enabled }}
+      {{- with .Values.compactor.dnsConfigOverides.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
       volumes:
-        - configMap:
-            name: {{ template "tempo.fullname" . }}
-          name: tempo-conf
+        - name: config
+          {{- include "tempo.configVolume" . | nindent 10 }}
+        - name: runtime-config
+          {{- include "tempo.runtimeVolume" . | nindent 10 }}
+        - name: tempo-compactor-store
+          emptyDir: {}
+        {{- if .Values.enterprise.enabled }}
+        - name: license
+          secret:
+            secretName: {{ tpl .Values.license.secretName . }}
+        {{- end }}
         {{- with .Values.compactor.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

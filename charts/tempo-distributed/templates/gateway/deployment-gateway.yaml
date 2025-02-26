@@ -1,17 +1,21 @@
 {{- if .Values.gateway.enabled }}
+{{ $dict := dict "ctx" . "component" "gateway" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "tempo.gatewayFullname" . }}
+  name: {{ include "tempo.resourceName" $dict }}
+  namespace: {{ .Release.Namespace }}
   labels:
-    {{- include "tempo.gatewayLabels" . | nindent 4 }}
+    {{- include "tempo.labels" $dict | nindent 4 }}
 spec:
   minReadySeconds: 10
+{{- if not .Values.gateway.autoscaling.enabled }}
   replicas: {{ .Values.gateway.replicas }}
+{{- end }}
   revisionHistoryLimit: 10
   selector:
     matchLabels:
-      {{- include "tempo.gatewaySelectorLabels" . | nindent 6 }}
+      {{- include "tempo.selectorLabels" $dict | nindent 6 }}
   template:
     metadata:
       annotations:
@@ -23,7 +27,7 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "tempo.gatewaySelectorLabels" . | nindent 8 }}
+        {{- include "tempo.selectorLabels" $dict | nindent 8 }}
         {{- with .Values.tempo.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -31,19 +35,37 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
     spec:
+      {{- if or (.Values.gateway.priorityClassName) (.Values.global.priorityClassName) }}
+      priorityClassName: {{ default .Values.gateway.priorityClassName .Values.global.priorityClassName }}
+      {{- end }}
       serviceAccountName: {{ include "tempo.serviceAccountName" . }}
+      {{- with .Values.tempo.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.gateway.terminationGracePeriodSeconds }}
+      enableServiceLinks: false
+      {{- include "tempo.gatewayImagePullSecrets" . | nindent 6 -}}
+      {{- with .Values.gateway.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: nginx
-          image: {{ include "tempo.gatewayImage" . }}
+          image: "{{ include "tempo.imageReference" $dict }}"
           imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
           ports:
-            - name: http
+            - name: http-metrics
               containerPort: 8080
               protocol: TCP
-          {{- with .Values.gateway.extraEnv }}
+          {{- if or .Values.global.extraEnv .Values.gateway.extraEnv }}
           env:
-            {{- toYaml . | nindent 12 }}
+            {{- with .Values.global.extraEnv }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.gateway.extraEnv }}
+              {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           {{- with .Values.gateway.extraEnvFrom }}
           envFrom:
@@ -54,6 +76,10 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/nginx
+            {{- if .Values.enterprise.enabled }}
+            - name: license
+              mountPath: /license
+            {{- end }}
             {{- if .Values.gateway.basicAuth.enabled }}
             - name: auth
               mountPath: /etc/nginx/secrets
@@ -71,6 +97,12 @@ spec:
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+      {{- if semverCompare ">= 1.19-0" .Capabilities.KubeVersion.Version }}
+      {{- with .Values.gateway.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- tpl . $ | nindent 8 }}
+      {{- end }}
+      {{- end }}
       {{- with .Values.gateway.affinity }}
       affinity:
         {{- tpl . $ | nindent 8 }}
@@ -86,7 +118,12 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: {{ include "tempo.gatewayFullname" . }}
+            name: {{ include "tempo.resourceName" (dict "ctx" . "component" "gateway") }}
+        {{- if .Values.enterprise.enabled -}}
+        - name: license
+          secret:
+            secretName: {{ tpl .Values.license.secretName . }}
+        {{- end }}
         {{- if .Values.gateway.basicAuth.enabled }}
         - name: auth
           secret:

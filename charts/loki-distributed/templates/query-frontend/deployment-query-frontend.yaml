@@ -2,6 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "loki.queryFrontendFullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "loki.queryFrontendLabels" . | nindent 4 }}
   {{- with .Values.loki.annotations }}
@@ -23,7 +24,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: {{ include (print .Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- include "loki.config.checksum" . | nindent 8 }}
         {{- with .Values.loki.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -32,6 +33,7 @@ spec:
         {{- end }}
       labels:
         {{- include "loki.queryFrontendSelectorLabels" . | nindent 8 }}
+        app.kubernetes.io/part-of: memberlist
         {{- with .Values.loki.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -44,6 +46,10 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.queryFrontend.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- include "loki.queryFrontendPriorityClassName" . | nindent 6 }}
       securityContext:
         {{- toYaml .Values.loki.podSecurityContext | nindent 8 }}
@@ -52,6 +58,10 @@ spec:
         - name: query-frontend
           image: {{ include "loki.queryFrontendImage" . }}
           imagePullPolicy: {{ .Values.loki.image.pullPolicy }}
+          {{- if or .Values.loki.command .Values.queryFrontend.command }}
+          command:
+            - {{ coalesce .Values.queryFrontend.command .Values.loki.command | quote }}
+          {{- end }}
           args:
             - -config.file=/etc/loki/config/config.yaml
             - -target=query-frontend
@@ -65,6 +75,9 @@ spec:
             - name: grpc
               containerPort: 9095
               protocol: TCP
+            - name: http-memberlist
+              containerPort: 7946
+              protocol: TCP
           {{- with .Values.queryFrontend.extraEnv }}
           env:
             {{- toYaml . | nindent 12 }}
@@ -75,9 +88,15 @@ spec:
           {{- end }}
           securityContext:
             {{- toYaml .Values.loki.containerSecurityContext | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.loki.readinessProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.loki.livenessProbe | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/loki/config
+            - name: runtime-config
+              mountPath: /var/{{ include "loki.name" . }}-runtime
             {{- with .Values.queryFrontend.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -103,10 +122,16 @@ spec:
           {{- if .Values.loki.existingSecretForConfig }}
           secret:
             secretName: {{ .Values.loki.existingSecretForConfig }}
+          {{- else if .Values.loki.configAsSecret }}
+          secret:
+            secretName: {{ include "loki.fullname" . }}-config
           {{- else }}
           configMap:
             name: {{ include "loki.fullname" . }}
           {{- end }}
+        - name: runtime-config
+          configMap:
+            name: {{ template "loki.fullname" . }}-runtime
         {{- with .Values.queryFrontend.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

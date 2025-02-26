@@ -22,6 +22,44 @@ helm repo add grafana https://grafana.github.io/helm-charts
 
 Major version upgrades listed here indicate that there is an incompatible breaking change needing manual actions.
 
+### To 0.80.0
+
+Upgrading to chart 0.80.0 will set the memberlist cluster_label config option. During rollout your cluster will temporarilly be split into two memberlist clusters until all components are rolled out. This will interrupt reads and writes. This config option is set to prevent cross talk between Loki and other memberlist clusters.
+
+### From 0.78.x to 0.79.0
+Removed the hardcoded, deprecated `boltdb.shipper.compactor.working-directory` flag in the Compactor Deployment template, so that it can be set with `.Values.compactor.extraArgs` and the `compactor.working-directory` flag if necessary.
+
+### From 0.74.x to 0.75.0
+The Index Gateway and Query Scheduler now expose the memberlist port 7946. In order to join the
+member list, you need to specify this in the `structuredConfig`:
+```yaml
+loki:
+  structuredConfig:
+    index_gateway:
+      mode: ring
+    query_scheduler:
+      use_scheduler_ring: true
+```
+
+### From 0.68.x to 0.69.0
+The in-memory `fifocache` has been renamed to more general `embedded_cache`, which currently doesn't have a `max_size_items` attribute.
+```yaml
+loki:
+  config: |
+    chunk_store_config:
+      chunk_cache_config:
+        embedded_cache:
+          enabled: false 
+```
+
+`compactor_address` has to be explicitly set in the `common` section of the config.
+```yaml
+loki:
+  config: |
+    common:
+      compactor_address: {{"{{"}} include "loki.compactorFullname" . {{"}}"}}:3100
+```
+
 ### From 0.41.x to 0.42.0
 All containers were previously named "loki". This version changes the container names to make the chart compatible with the loki-mixin. Now the container names correctly reflect the component (querier, distributor, ingester, ...). If you are using custom prometheus rules that use the container name you probably have to change them.
 
@@ -139,7 +177,7 @@ The above configuration selectively overrides default values found in the `loki.
 Using `loki.structuredConfig` it is possible to externally set most any configuration parameter (special considerations for elements of an array).
 
 ```
-helm upgrade loki --install -f values.yaml --set loki.structuredConfig.storage_config.aws.bucketnames=my-loki-bucket
+helm upgrade loki-distributed --install -f values.yaml --set loki.structuredConfig.storage_config.aws.bucketnames=my-loki-bucket
 ```
 
 `loki.config`, `loki.schemaConfig` and `loki.storageConfig` may also be used in conjuction with `loki.structuredConfig`. Values found in `loki.structuredConfig` will take precedence. Array values, such as those found in `loki.schema_config` will be overridden wholesale and not amended to.
@@ -163,7 +201,7 @@ loki:
 ```
 
 ```console
-helm upgrade loki --install -f values.yaml --set bucketnames=my-loki-bucket
+helm upgrade loki-distributed --install -f values.yaml --set bucketnames=my-loki-bucket
 ```
 
 ## Gateway
@@ -241,7 +279,7 @@ loki:
         memcached_client:
           consistent_hash: true
           host: {{"{{"}} include "loki.memcachedChunksFullname" . {{"}}"}}
-          service: http
+          service: memcached-client
 ```
 
 ### memcached-frontend
@@ -260,7 +298,7 @@ loki:
             consistent_hash: true
             host: {{"{{"}} include "loki.memcachedFrontendFullname" . {{"}}"}}
             max_idle_conns: 16
-            service: http
+            service: memcached-client
             timeout: 500ms
             update_interval: 1m
 ```
@@ -281,7 +319,7 @@ loki:
         memcached_client:
           consistent_hash: true
           host: {{"{{"}} include "loki.memcachedIndexQueriesFullname" . {{"}}"}}
-          service: http
+          service: memcached-client
 ```
 
 ### memcached-index-writes
@@ -302,7 +340,7 @@ loki:
         memcached_client:
           consistent_hash: true
           host: {{"{{"}} include "loki.memcachedIndexWritesFullname" . {{"}}"}}
-          service: http
+          service: memcached-client
 ```
 
 ## Compactor

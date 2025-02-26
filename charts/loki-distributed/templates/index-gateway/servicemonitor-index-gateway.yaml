@@ -25,11 +25,10 @@ spec:
   selector:
     matchLabels:
       {{- include "loki.indexGatewaySelectorLabels" $ | nindent 6 }}
+    {{- with .matchExpressions }}
     matchExpressions:
-      - key: prometheus.io/service-monitor
-        operator: NotIn
-        values:
-          - "false"
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
   endpoints:
     - port: http
       {{- with .interval }}
@@ -53,6 +52,10 @@ spec:
       tlsConfig:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+  {{- with .targetLabels }}
+  targetLabels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}
 {{- end }}
 {{- end }}

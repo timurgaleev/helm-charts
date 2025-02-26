@@ -23,7 +23,7 @@ spec:
   template:
     metadata:
       annotations:
-        checksum/config: {{ include (print .Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- include "loki.config.checksum" . | nindent 8 }}
         {{- with .Values.loki.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -45,14 +45,26 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.ruler.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- include "loki.rulerPriorityClassName" . | nindent 6 }}
       securityContext:
         {{- toYaml .Values.loki.podSecurityContext | nindent 8 }}
       terminationGracePeriodSeconds: {{ .Values.ruler.terminationGracePeriodSeconds }}
+      {{- with .Values.ruler.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: ruler
           image: {{ include "loki.rulerImage" . }}
           imagePullPolicy: {{ .Values.loki.image.pullPolicy }}
+          {{- if or .Values.loki.command .Values.ruler.command }}
+          command:
+            - {{ coalesce .Values.ruler.command .Values.loki.command | quote }}
+          {{- end }}
           args:
             - -config.file=/etc/loki/config/config.yaml
             - -target=ruler
@@ -66,6 +78,9 @@ spec:
             - name: grpc
               containerPort: 9095
               protocol: TCP
+            - name: http-memberlist
+              containerPort: 7946
+              protocol: TCP
           {{- with .Values.ruler.extraEnv }}
           env:
             {{- toYaml . | nindent 12 }}
@@ -78,9 +93,13 @@ spec:
             {{- toYaml .Values.loki.containerSecurityContext | nindent 12 }}
           readinessProbe:
             {{- toYaml .Values.loki.readinessProbe | nindent 12 }}
+          livenessProbe:
+            {{- toYaml .Values.loki.livenessProbe | nindent 12 }}
           volumeMounts:
             - name: config
               mountPath: /etc/loki/config
+            - name: runtime-config
+              mountPath: /var/{{ include "loki.name" . }}-runtime
             - name: data
               mountPath: /var/loki
             - name: tmp
@@ -109,15 +128,25 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.ruler.dnsConfig }}
+      dnsConfig:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       volumes:
         - name: config
           {{- if .Values.loki.existingSecretForConfig }}
           secret:
             secretName: {{ .Values.loki.existingSecretForConfig }}
+          {{- else if .Values.loki.configAsSecret }}
+          secret:
+            secretName: {{ include "loki.fullname" . }}-config
           {{- else }}
           configMap:
             name: {{ include "loki.fullname" . }}
           {{- end }}
+        - name: runtime-config
+          configMap:
+            name: {{ template "loki.fullname" . }}-runtime
         {{- range $dir, $_ := .Values.ruler.directories }}
         - name: {{ include "loki.rulerRulesDirName" $dir }}
           configMap:
